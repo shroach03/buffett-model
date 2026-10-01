@@ -18,6 +18,7 @@ Conventions (stated so they can be argued with):
   ("not meaningful"), never as a huge or negative percentage. Buybacks can
   drive equity negative (Waters FY2019) without the business being impaired.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -37,7 +38,7 @@ class Returns:
     roe: list[float | None]
     roic: list[float | None]
     roiic_5y: float | None
-    reinvestment_rate_5y: float | None   # b: share of NOPAT retained as new invested capital
+    reinvestment_rate_5y: float | None  # b: share of NOPAT retained as new invested capital
     roiic_note: str = ""
 
 
@@ -59,38 +60,55 @@ def compute(f: Financials, span: int = 5) -> Returns:
     ebit = f["operating_income"]
     nopat = [e * (1 - tax) if e is not None else None for e in ebit]
 
-    excess, ic = [], []
+    excess: list[float | None] = []
+    ic: list[float | None] = []
     for i in range(n):
         cash, sti, rev = f["cash"][i], f["st_investments"][i], f["revenue"][i]
         if cash is None or rev is None:
-            excess.append(None); ic.append(None); continue
+            excess.append(None)
+            ic.append(None)
+            continue
         x = max(cash + (sti or 0.0) - OPERATING_CASH_PCT * rev, 0.0)
         excess.append(x)
         debt = (f["long_term_debt"][i] or 0.0) + (f["short_term_debt"][i] or 0.0)
         eq = f["equity"][i]
         ic.append(None if eq is None else debt + eq - x)
 
-    roe, roic = [None], [None]
+    roe: list[float | None] = [None]
+    roic: list[float | None] = [None]
     for i in range(1, n):
         eq = _avg(f["equity"][i], f["equity"][i - 1])
         ni = f["net_income"][i]
         roe.append(ni / eq if ni is not None and eq and eq > 0 else None)
         c = _avg(ic[i], ic[i - 1])
-        roic.append(nopat[i] / c if nopat[i] is not None and c and c > 0 else None)
+        nop = nopat[i]
+        roic.append(nop / c if nop is not None and c and c > 0 else None)
 
-    roiic, b, note = None, None, ""
-    if n > span and None not in (nopat[-1], nopat[-1 - span], ic[-1], ic[-1 - span]):
-        d_nopat = nopat[-1] - nopat[-1 - span]
-        d_ic = ic[-1] - ic[-1 - span]
-        cum_nopat = sum(x for x in nopat[-span:] if x is not None)
-        if d_ic > 0:
-            roiic = d_nopat / d_ic
-        else:
-            note = (f"invested capital fell by {-d_ic / 1e6:,.0f}M over {span}y while NOPAT changed "
-                    f"by {d_nopat / 1e6:,.0f}M; ROIIC not meaningful")
-        if cum_nopat > 0:
-            b = min(max(d_ic / cum_nopat, 0.0), 1.0)
+    roiic, b, note = _roiic(nopat, ic, span)
     return Returns(tax, nopat, ic, excess, roe, roic, roiic, b, note)
+
+
+def _roiic(nopat: list[float | None], ic: list[float | None], span: int) -> tuple[float | None, float | None, str]:
+    """(ROIIC over ``span`` years, reinvestment rate b, note when ROIIC is not meaningful)."""
+    if len(nopat) <= span:
+        return None, None, ""
+    n1, n0, ic1, ic0 = nopat[-1], nopat[-1 - span], ic[-1], ic[-1 - span]
+    if n1 is None or n0 is None or ic1 is None or ic0 is None:
+        return None, None, ""
+    roiic, b, note = None, None, ""
+    d_nopat = n1 - n0
+    d_ic = ic1 - ic0
+    cum_nopat = sum(x for x in nopat[-span:] if x is not None)
+    if d_ic > 0:
+        roiic = d_nopat / d_ic
+    else:
+        note = (
+            f"invested capital fell by {-d_ic / 1e6:,.0f}M over {span}y while NOPAT changed "
+            f"by {d_nopat / 1e6:,.0f}M; ROIIC not meaningful"
+        )
+    if cum_nopat > 0:
+        b = min(max(d_ic / cum_nopat, 0.0), 1.0)
+    return roiic, b, note
 
 
 def median_of(xs: list[float | None], last: int = 10) -> float | None:

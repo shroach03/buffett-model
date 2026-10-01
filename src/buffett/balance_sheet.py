@@ -19,9 +19,11 @@ beyond what is on the balance sheet, supplier financing, factored
 receivables, guarantees, litigation and maturity concentration. These belong
 in the judgment layer and are listed as such in the report.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import pairwise
 
 from .normalize import Financials
 
@@ -31,9 +33,9 @@ class BalanceSheet:
     total_debt: float
     operating_leases: float
     excess_cash: float
-    net_debt: float                 # incl. leases, less excess cash
+    net_debt: float  # incl. leases, less excess cash
     net_debt_to_oe: float | None
-    coverage: float | None          # None = no interest expense (effectively infinite)
+    coverage: float | None  # None = no interest expense (effectively infinite)
     stressed_net_debt_to_oe: float | None
     stressed_coverage: float | None
     leverage_fatal: bool
@@ -42,14 +44,15 @@ class BalanceSheet:
 def worst_decline(series: list[float | None]) -> float:
     """Worst one-year percentage change (<= 0) in a series, skipping gaps."""
     worst = 0.0
-    for a, b in zip(series, series[1:]):
+    for a, b in pairwise(series):
         if a is not None and b is not None and a > 0:
             worst = min(worst, b / a - 1)
     return max(worst, -1.0)
 
 
-def compute(f: Financials, excess_cash: float, normalized_oe: float | None,
-            oe_history: list[float | None], window: int = 10) -> BalanceSheet:
+def compute(
+    f: Financials, excess_cash: float, normalized_oe: float | None, oe_history: list[float | None], window: int = 10
+) -> BalanceSheet:
     debt = (f["long_term_debt"][-1] or 0.0) + (f["short_term_debt"][-1] or 0.0)
     leases = f["operating_leases"][-1] or 0.0
     net = debt + leases - excess_cash

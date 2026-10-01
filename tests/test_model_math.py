@@ -1,4 +1,5 @@
 """The Model's own numbers as test fixtures (§1, §10, §11)."""
+
 import pytest
 
 from buffett import valuation
@@ -10,16 +11,19 @@ OEPS, B, ROIIC, EXIT = 6.50, 0.60, 0.12, 15.0
 
 def test_growth_equals_retention_times_roiic():
     # Model §1: 60% x 15% = 9%, 60% x 6% = 3.6%; §11: 60% x 12% = 7.2%
-    assert 0.60 * 0.15 == pytest.approx(0.09)
-    assert 0.60 * 0.06 == pytest.approx(0.036)
-    assert B * ROIIC == pytest.approx(0.072)
+    assert pytest.approx(0.09) == 0.60 * 0.15
+    assert pytest.approx(0.036) == 0.60 * 0.06
+    assert pytest.approx(0.072) == B * ROIIC
 
 
-@pytest.mark.parametrize("price, p_oe, yield_, irr", [
-    (80, 12.3, 0.081, 0.125),
-    (100, 15.4, 0.065, 0.097),
-    (130, 20.0, 0.050, 0.066),
-])
+@pytest.mark.parametrize(
+    "price, p_oe, yield_, irr",
+    [
+        (80, 12.3, 0.081, 0.125),
+        (100, 15.4, 0.065, 0.097),
+        (130, 20.0, 0.050, 0.066),
+    ],
+)
 def test_section11_table(price, p_oe, yield_, irr):
     assert price / OEPS == pytest.approx(p_oe, abs=0.05)
     assert OEPS / price == pytest.approx(yield_, abs=0.0006)
@@ -60,33 +64,33 @@ def test_no_double_counting_growth_and_distribution():
 def test_zero_growth_dcf_is_a_perpetuity():
     flat = Case("flat", 0.10, 1.0, 0.0, 0.0, 0.20, 0.20)
     out = valuation.dcf(100.0, 1.0, 0.0, flat)
-    assert out["ivps"] == pytest.approx(1000.0)          # 100 / 10%
-    assert out["implied_exit_multiple"] == pytest.approx(10.0)
+    assert out.ivps == pytest.approx(1000.0)  # 100 / 10%
+    assert out.implied_exit_multiple == pytest.approx(10.0)
 
 
 def test_net_debt_reduces_value_per_share():
-    a = valuation.dcf(100.0, 10.0, 0.0, BASE)["ivps"]
-    b = valuation.dcf(100.0, 10.0, 200.0, BASE)["ivps"]
+    a = valuation.dcf(100.0, 10.0, 0.0, BASE).ivps
+    b = valuation.dcf(100.0, 10.0, 200.0, BASE).ivps
     assert a - b == pytest.approx(20.0)
 
 
 def test_irr_at_intrinsic_value_equals_discount_rate():
     # Internal consistency: the 10% ladder rung *is* base-case intrinsic value.
     oe, shares, nd = 500.0, 100.0, -300.0
-    ivps = valuation.dcf(oe, shares, nd, BASE)["ivps"]
+    ivps = valuation.dcf(oe, shares, nd, BASE).ivps
     assert valuation.case_irr(ivps, oe / shares, nd / shares, BASE) == pytest.approx(0.10, abs=1e-8)
     assert valuation.case_ladder(0.10, oe / shares, nd / shares, BASE) == pytest.approx(ivps, rel=1e-6)
 
 
 def test_required_exit_multiple_round_trip():
     oe, shares = 500.0, 100.0
-    ivps = valuation.dcf(oe, shares, 0.0, BASE)["ivps"]
-    implied = valuation.dcf(oe, shares, 0.0, BASE)["implied_exit_multiple"]
+    ivps = valuation.dcf(oe, shares, 0.0, BASE).ivps
+    implied = valuation.dcf(oe, shares, 0.0, BASE).implied_exit_multiple
     assert valuation.required_exit_multiple(ivps, oe / shares, 0.0, BASE) == pytest.approx(implied)
 
 
 def test_reverse_dcf_recovers_growth():
     oe, shares = 500.0, 100.0
-    target = valuation.dcf(oe, shares, 0.0, BASE)["ivps"]
+    target = valuation.dcf(oe, shares, 0.0, BASE).ivps
     probe = Case("base", 0.10, 1.0, 0.0, 0.025, 0.20, 0.20)
     assert valuation.reverse_dcf(target, oe, shares, 0.0, probe) == pytest.approx(0.08, abs=1e-6)
