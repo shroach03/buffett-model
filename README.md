@@ -45,7 +45,8 @@ SEC companyfacts JSON ──► normalize.py ──► owner_earnings / returns 
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                                   # 48 tests, offline
+pytest -q                                   # 79 tests, offline (CI also enforces >= 85% coverage)
+ruff check . && ruff format --check . && mypy src   # lint, format, types (all run in CI)
 buffett screen CPRT GGG ROL WAT WSO         # summary table
 buffett analyze ROL --out reports           # full brief
 export SEC_USER_AGENT="Your Name you@example.com"
@@ -113,7 +114,6 @@ The SEC publishes every tagged number from every filing as JSON (no scraping inv
 - **Balance-sheet items XBRL can't see**: pension detail, supplier financing, guarantees, litigation and maturity walls belong in the judgment layer.
 - **Fatal-flaw leverage threshold** (stressed net debt > 3× OE or coverage < 3×) is this project's reading of the Model, not the Model's text.
 - **Point bands** within each scorecard category are an operationalization. WSO shows that the ROIIC window alone can move a verdict.
-- **Live fetch path** (`--live`) isn't exercised in CI. It shares the schema and normalizer with the bundled snapshots.
 
 ## Layout
 
@@ -134,7 +134,7 @@ data/fixtures/       gzipped SEC companyfacts snapshots (10-K facts) for offline
 data/judgment/       moat / management / fatal-flaw inputs, each with a source and date
 data/prices.json     dated price snapshot
 reports/             generated briefs
-tests/               Model-math, normalization and five-company integration tests
+tests/               Model-math, normalization, CLI, mocked SEC client and five-company integration tests
 ```
 
 ## Reproducibility
