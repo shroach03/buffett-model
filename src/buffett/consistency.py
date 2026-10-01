@@ -1,7 +1,9 @@
 """Model §4: the four ten-year consistency tests."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import pairwise
 
 
 @dataclass
@@ -18,8 +20,9 @@ class Consistency:
     conversion_test_pass: bool | None
 
 
-def compute(oe: list[float | None], oeps: list[float | None], net_income: list[float | None],
-            window: int = 10) -> Consistency:
+def compute(
+    oe: list[float | None], oeps: list[float | None], net_income: list[float | None], window: int = 10
+) -> Consistency:
     oe, oeps, ni = oe[-window:], oeps[-window:], net_income[-window:]
     avail = [x for x in oe if x is not None]
     positive = sum(1 for x in avail if x > 0)
@@ -29,11 +32,11 @@ def compute(oe: list[float | None], oeps: list[float | None], net_income: list[f
     if len(idx) >= 2:
         first, last = oeps[idx[0]], oeps[idx[-1]]
         span = idx[-1] - idx[0]  # (OEPS_10 / OEPS_1)^(1/9) - 1 for a full window
-        if first > 0 and last > 0:
+        if first is not None and last is not None and first > 0 and last > 0:
             cagr = (last / first) ** (1 / span) - 1
 
     down, worst1 = 0, None
-    for a, b in zip(oeps, oeps[1:]):
+    for a, b in pairwise(oeps):
         if a is None or b is None or a <= 0:
             continue
         chg = b / a - 1
@@ -41,7 +44,7 @@ def compute(oe: list[float | None], oeps: list[float | None], net_income: list[f
             down += 1
             worst1 = chg if worst1 is None else min(worst1, chg)
 
-    peak, worst_dd, recovery, longest, below_since = None, None, 0, 0, None
+    peak, worst_dd, longest, below_since = None, None, 0, None
     for i, x in enumerate(oeps):
         if x is None:
             continue
@@ -58,7 +61,7 @@ def compute(oe: list[float | None], oeps: list[float | None], net_income: list[f
     if below_since is not None:  # never regained the peak inside the window
         longest = max(longest, len(oeps) - 1 - below_since)
 
-    pairs = [(o, n) for o, n in zip(oe, ni) if o is not None and n is not None]
+    pairs = [(o, n) for o, n in zip(oe, ni, strict=True) if o is not None and n is not None]
     conv = sum(o for o, _ in pairs) / sum(n for _, n in pairs) if pairs and sum(n for _, n in pairs) > 0 else None
 
     return Consistency(

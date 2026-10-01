@@ -1,25 +1,39 @@
 """Command line: ``python -m buffett <command>``.
 
-  analyze TICKER [--live] [--price P] [--no-judgment] [--out DIR]
-  screen  TICKER [TICKER ...] [--live]        one-line-per-company summary table
-  snapshot TICKER [TICKER ...]                save live SEC data as an offline fixture
+analyze TICKER [--live] [--price P] [--no-judgment] [--out DIR]
+screen  TICKER [TICKER ...] [--live]        one-line-per-company summary table
+snapshot TICKER [TICKER ...]                save live SEC data as an offline fixture
 """
+
 from __future__ import annotations
 
 import argparse
 import gzip
 import json
+import re
 import sys
 from pathlib import Path
 
 from . import edgar, report
 from .analysis import analyze
 
+# Tickers become file names (fixtures, judgment, --out), so reject anything that
+# could escape those directories: no "/", "\" or "..".
+TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+
+
+def ticker(value: str) -> str:
+    t = value.strip().upper()
+    if not TICKER_RE.match(t) or ".." in t:
+        raise argparse.ArgumentTypeError(f"invalid ticker {value!r}")
+    return t
+
 
 def _run(ticker, args):
     facts = edgar.load(ticker, live=args.live)
-    return analyze(ticker, facts=facts, price=getattr(args, "price", None),
-                   judgment=not getattr(args, "no_judgment", False))
+    return analyze(
+        ticker, facts=facts, price=getattr(args, "price", None), judgment=not getattr(args, "no_judgment", False)
+    )
 
 
 def main(argv=None) -> int:
@@ -27,20 +41,21 @@ def main(argv=None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
-    ap =argparse.ArgumentParser(prog="buffett", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="buffett", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("analyze")
-    a.add_argument("ticker")
+    a.add_argument("ticker", type=ticker)
     a.add_argument("--live", action="store_true", help="fetch from SEC instead of the bundled snapshot")
     a.add_argument("--price", type=float)
     a.add_argument("--no-judgment", action="store_true", help="ignore data/judgment inputs")
     a.add_argument("--out", type=Path, help="write the brief to DIR/TICKER.md")
     s = sub.add_parser("screen")
-    s.add_argument("tickers", nargs="+")
+    s.add_argument("tickers", nargs="+", type=ticker)
     s.add_argument("--live", action="store_true")
     n = sub.add_parser("snapshot")
-    n.add_argument("tickers", nargs="+")
+    n.add_argument("tickers", nargs="+", type=ticker)
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":

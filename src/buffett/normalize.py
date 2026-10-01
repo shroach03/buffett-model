@@ -17,16 +17,22 @@ The hard parts, each handled explicitly here:
   company's own year-end dates with a few days' tolerance.
 * Tag drift and missing tags: see ``concepts.py``.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from itertools import pairwise
 
 from .concepts import CONCEPTS, Concept
 
 ANNUAL_DAYS = (350, 380)
 END_TOLERANCE_DAYS = 6
 RESTATEMENT_THRESHOLD = 0.005  # log restatements that move a value by >0.5%
+# A share count filed in thousands instead of units reads ~1000x too small. The
+# ratio to the largest same-period value is only near 1000x if nothing else moved:
+SCALE_ERR_MIN = 500  # 1000x error, less up to a 2x difference the other way (e.g. a later reverse split)
+SCALE_ERR_MAX = 20_000  # 1000x error, plus up to 20x from stock splits restated in later filings
 
 
 @dataclass
@@ -47,9 +53,9 @@ class Restatement:
 class Financials:
     ticker: str
     name: str
-    years: list[str]                      # fiscal year-end dates, ascending (ISO)
-    data: dict[str, list[float | None]]   # concept -> values aligned with years
-    source: dict[str, list[str | None]]   # concept -> winning tag(s) per year
+    years: list[str]  # fiscal year-end dates, ascending (ISO)
+    data: dict[str, list[float | None]]  # concept -> values aligned with years
+    source: dict[str, list[str | None]]  # concept -> winning tag(s) per year
     restatements: list[Restatement] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
@@ -150,7 +156,7 @@ def _adjust_share_series(facts: dict, tag: str, kind: str) -> tuple[dict[str, di
     for end, group in by_end.items():
         big = max(g["val"] for g in group)
         for g in group:
-            if g["val"] and 500 < big / g["val"] < 2000 * 10:
+            if g["val"] and SCALE_ERR_MIN < big / g["val"] < SCALE_ERR_MAX:
                 g["val"] *= 1000
                 notes.append(f"{tag} {end}: value filed {g['filed']} was off by 1000x (unscaled thousands); rescaled")
     # A lone value with no second filing can still be unscaled; compare with neighbours.
@@ -158,15 +164,15 @@ def _adjust_share_series(facts: dict, tag: str, kind: str) -> tuple[dict[str, di
     for i, end in enumerate(ends):
         group = by_end[end]
         latest = max(group, key=lambda g: g["filed"])
-        neighbours = [max(by_end[e], key=lambda g: g["filed"])["val"] for e in ends[max(0, i - 2):i + 3] if e != end]
-        if neighbours and latest["val"] and min(neighbours) / latest["val"] > 500:
+        neighbours = [max(by_end[e], key=lambda g: g["filed"])["val"] for e in ends[max(0, i - 2) : i + 3] if e != end]
+        if neighbours and latest["val"] and min(neighbours) / latest["val"] > SCALE_ERR_MIN:
             latest["val"] *= 1000
             notes.append(f"{tag} {end}: value off by 1000x vs neighbouring years; rescaled")
     # 2. splits
     events: list[tuple[str, float]] = []  # (split happened after this filing date, factor)
-    for end, group in by_end.items():
+    for group in by_end.values():
         group.sort(key=lambda g: g["filed"])
-        for old, new in zip(group, group[1:]):
+        for old, new in pairwise(group):
             if old["val"] and new["val"] != old["val"]:
                 f = _split_like(new["val"] / old["val"])
                 if f:
@@ -271,8 +277,9 @@ def build_financials(facts: dict, ticker: str, n_years: int = 13) -> Financials:
 
     # Derived fallback: EBIT = pretax income + interest when OperatingIncomeLoss is absent.
     for i, v in enumerate(data["operating_income"]):
-        if v is None and data["pretax_income"][i] is not None:
-            data["operating_income"][i] = data["pretax_income"][i] + (data["interest_expense"][i] or 0.0)
+        pretax = data["pretax_income"][i]
+        if v is None and pretax is not None:
+            data["operating_income"][i] = pretax + (data["interest_expense"][i] or 0.0)
             source["operating_income"][i] = "derived: pretax_income + interest_expense"
             flags.append(f"operating_income {years[i][:7]}: derived from pretax + interest")
 

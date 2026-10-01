@@ -11,6 +11,7 @@ Two loaders share one schema:
     are the same JSON filtered to 10-K facts, so tests run offline and the
     results in the README are reproducible.
 """
+
 from __future__ import annotations
 
 import gzip
@@ -34,9 +35,7 @@ _last_request = 0.0
 def _user_agent() -> str:
     ua = os.environ.get("SEC_USER_AGENT")
     if not ua:
-        raise RuntimeError(
-            "Set SEC_USER_AGENT to 'Your Name your@email.com' (required by SEC fair-access rules)."
-        )
+        raise RuntimeError("Set SEC_USER_AGENT to 'Your Name your@email.com' (required by SEC fair-access rules).")
     return ua
 
 
@@ -50,7 +49,8 @@ def _get_json(url: str) -> dict:
     resp = requests.get(url, headers={"User-Agent": _user_agent()}, timeout=30)
     _last_request = time.monotonic()
     resp.raise_for_status()
-    return resp.json()
+    data: dict = resp.json()
+    return data
 
 
 def _cached(name: str, url: str) -> dict:
@@ -59,7 +59,8 @@ def _cached(name: str, url: str) -> dict:
     path = CACHE / f"{name}.{date.today().isoformat()}.json.gz"
     if path.exists():
         with gzip.open(path, "rt", encoding="utf-8") as f:
-            return json.load(f)
+            cached: dict = json.load(f)
+        return cached
     data = _get_json(url)
     with gzip.open(path, "wt", encoding="utf-8") as f:
         json.dump(data, f)
@@ -84,7 +85,8 @@ def load_snapshot(ticker: str) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"No snapshot for {ticker} at {path}")
     with gzip.open(path, "rt", encoding="utf-8") as f:
-        return json.load(f)
+        facts: dict = json.load(f)
+    return facts
 
 
 def load(ticker: str, live: bool = False) -> dict:
