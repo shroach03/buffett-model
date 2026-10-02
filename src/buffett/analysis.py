@@ -5,6 +5,7 @@ Model default is a named parameter in ``Assumptions``."""
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,12 +14,13 @@ from . import balance_sheet, consistency, edgar, owner_earnings, returns, scorec
 from .normalize import Financials, build_financials
 from .valuation import Case, CaseResult
 
-DATA = edgar.REPO_ROOT / "data"
+DATA = edgar.DATA
 
 
 @dataclass(frozen=True)
 class Assumptions:
-    hurdle: float = 0.10  # Model: 10% unless the user updates it
+    hurdle: float = scorecard.HURDLE  # Model: 10% unless the user updates it
+    min_mos: float = scorecard.MIN_MOS  # Model: 20% discount to base-case IV
     roiic_cap: float = 0.30  # no base case assumes >30% on new capital
     g_cap: float = 0.12  # no base case assumes >12% starting growth
     peak_guard: float = 1.15  # latest OE > 115% of 3y mean -> use the mean
@@ -63,9 +65,15 @@ def load_judgment(ticker: str, directory: Path = DATA / "judgment") -> scorecard
     if not p.exists():
         return None
     d = json.loads(p.read_text(encoding="utf-8"))
-    return scorecard.Judgment(
-        d["moat"], d["management"], d["source"], d["date"], d.get("fatal_flaws", []), d.get("notes", "")
-    )
+    missing = [k for k in ("moat", "management", "source", "date") if k not in d]
+    if missing:
+        raise ValueError(f"{p}: missing required field(s): {', '.join(missing)}")
+    try:
+        return scorecard.Judgment(
+            d["moat"], d["management"], d["source"], d["date"], d.get("fatal_flaws", []), d.get("notes", "")
+        )
+    except ValueError as e:
+        raise ValueError(f"{p}: {e}") from e
 
 
 def _resolve_judgment(ticker: str, judgment: scorecard.Judgment | bool | None) -> scorecard.Judgment | None:
@@ -93,6 +101,8 @@ def analyze(
     judgment: scorecard.Judgment | bool | None = True,
     a: Assumptions = DEFAULT_ASSUMPTIONS,
 ) -> Result:
+    if price is not None and (isinstance(price, bool) or not math.isfinite(price) or price <= 0):
+        raise ValueError(f"price must be a finite number > 0, got {price!r}")
     facts = facts or edgar.load_snapshot(ticker)
     fin = build_financials(facts, ticker)
     warnings: list[str] = []
@@ -105,6 +115,8 @@ def analyze(
     oeps = norm_oe / shares if norm_oe and shares else None
     bs = balance_sheet.compute(fin, ret.excess_cash[-1] or 0.0, norm_oe, oe.owner_earnings, a.window)
 
+    if bs.coverage_status == "unknown" or not bs.debt_known:
+        warnings.append("leverage stress test incomplete: debt or interest data missing")
     if cons.years_available < a.window:
         warnings.append(
             f"only {cons.years_available} of {a.window} years of owner earnings computable "
@@ -137,7 +149,8 @@ def _valuation_inputs(
         roiic_base, b_hist = a.hurdle, 0.0
     g_base = min(b_hist * roiic_base, a.g_cap) if roiic_base else 0.0
     b_base = g_base / roiic_base if roiic_base else 0.0
-    net_debt_dcf = bs.total_debt - bs.excess_cash  # leases excluded: lease cost is already in OE
+    # leases excluded: lease cost is already in OE. Unknown debt -> no DCF rather than a debt-free one.
+    net_debt_dcf = None if bs.total_debt is None else bs.total_debt - bs.excess_cash
     inputs = {
         "roiic_5y": ret.roiic_5y,
         "roic_median": roic_med,
@@ -149,6 +162,7 @@ def _valuation_inputs(
         "tax_rate": ret.tax_rate,
         "net_debt_dcf": net_debt_dcf,
         "shares": shares,
+        "hurdle": a.hurdle,
     }
     return inputs, b_hist
 
@@ -161,9 +175,9 @@ def _build_cases(
     roiic_5y: float | None,
     a: Assumptions,
 ) -> list[CaseResult]:
-    """Bear / base / bull DCFs (Model §10); empty when OE, shares or ROIIC are unknown."""
+    """Bear / base / bull DCFs (Model §10); empty when OE, shares, ROIIC or debt are unknown."""
     roiic_base, g_base = inputs["roiic_base"], inputs["g_base"]
-    if not (norm_oe and shares and roiic_base):
+    if not (norm_oe and shares and roiic_base) or inputs["net_debt_dcf"] is None:
         return []
     hist = min(roiic_5y if roiic_5y is not None else roiic_base, 0.40)
     base_case = Case("base", a.hurdle, 1.0, g_base, 0.025, roiic_base, roiic_base)
@@ -208,7 +222,7 @@ def _price_outputs(
 ) -> _PriceOutputs:
     """Price-dependent outputs. The conservative expected return is the ten-year
     IRR of the *base case* (same growth path and Gordon terminal value as the
-    DCF), so the 10% ladder rung equals base-case intrinsic value and every
+    DCF), so the hurdle-rate ladder rung equals base-case intrinsic value and every
     number on the card agrees."""
     po = _PriceOutputs()
     shares = inputs["shares"]
@@ -218,7 +232,8 @@ def _price_outputs(
     nd_ps = inputs["net_debt_dcf"] / shares
     base = next(c for c in cases if c.case == "base")
     try:
-        po.ladder = {t: valuation.case_ladder(t, oeps, nd_ps, base.assumptions) for t in (0.08, 0.10, 0.12, 0.15)}
+        rungs = sorted({0.08, 0.10, 0.12, 0.15, inputs["hurdle"]})
+        po.ladder = {t: valuation.case_ladder(t, oeps, nd_ps, base.assumptions) for t in rungs}
     except ValueError:
         warnings.append("price ladder not computable: the base-case IRR could not be solved")
     if price:
@@ -284,4 +299,4 @@ def _score(
     fatal = []
     if bs.leverage_fatal:
         fatal.append("leverage under adverse conditions (stressed net debt > 3x OE or coverage < 3x)")
-    return lines, scorecard.verdict(lines, judgment, fatal, po.irr, po.mos)
+    return lines, scorecard.verdict(lines, judgment, fatal, po.irr, po.mos, hurdle=a.hurdle, min_mos=a.min_mos)

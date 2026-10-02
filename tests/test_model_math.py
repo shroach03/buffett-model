@@ -2,7 +2,7 @@
 
 import pytest
 
-from buffett import valuation
+from buffett import analysis, balance_sheet, scorecard, valuation
 from buffett.valuation import Case
 
 # Model §11: OE/share $6.50, retention 60%, ROIIC 12%, exit at 15x owner earnings.
@@ -94,3 +94,91 @@ def test_reverse_dcf_recovers_growth():
     target = valuation.dcf(oe, shares, 0.0, BASE).ivps
     probe = Case("base", 0.10, 1.0, 0.0, 0.025, 0.20, 0.20)
     assert valuation.reverse_dcf(target, oe, shares, 0.0, probe) == pytest.approx(0.08, abs=1e-6)
+
+
+def _fin(ebit, interest, debt=0.0):
+    """Minimal latest-year Financials stand-in for balance_sheet.compute."""
+    return {
+        "long_term_debt": [debt],
+        "short_term_debt": [0.0],
+        "operating_leases": [0.0],
+        "interest_expense": [interest],
+        "operating_income": [ebit],
+    }
+
+
+def test_unknown_ebit_with_interest_scores_zero_coverage_points():
+    bs = balance_sheet.compute(_fin(None, 1_000_000.0), 0.0, 100e6, [100e6])
+    assert bs.coverage_status == "unknown" and bs.coverage is None
+    line = scorecard.balance_sheet(bs)
+    assert line.points == 5  # 5 for no net debt, 0 (not 5) for coverage
+    assert "coverage unknown" in line.basis
+
+
+def test_zero_interest_still_scores_full_coverage_points():
+    bs = balance_sheet.compute(_fin(50e6, 0.0), 0.0, 100e6, [100e6])
+    assert bs.coverage_status == "no_interest"
+    line = scorecard.balance_sheet(bs)
+    assert line.points == 10
+    assert "no interest" in line.basis
+
+
+def test_debt_gap_is_unknown_not_zero():
+    f = _fin(50e6, 1e6)
+    f["long_term_debt"] = [None]
+    bs = balance_sheet.compute(f, 0.0, 100e6, [100e6])
+    assert not bs.debt_known and bs.net_debt is None and bs.net_debt_to_oe is None
+    assert "net debt unknown" in scorecard.balance_sheet(bs).basis
+
+
+def test_unknown_ebit_produces_leverage_warning(monkeypatch):
+    real = analysis.build_financials
+
+    def drop_ebit(facts, ticker):
+        fin = real(facts, ticker)
+        fin["operating_income"][-1] = None
+        return fin
+
+    monkeypatch.setattr(analysis, "build_financials", drop_ebit)
+    r = analysis.analyze("ROL")
+    assert r.bs.coverage_status == "unknown"
+    assert "leverage stress test incomplete: debt or interest data missing" in r.warnings
+    bs_line = next(line for line in r.lines if line.category == "Balance-sheet strength")
+    assert "coverage unknown" in bs_line.basis
+
+
+def test_custom_hurdle_drives_the_verdict():
+    a = analysis.Assumptions(hurdle=0.12)
+    r = analysis.analyze("GGG", a=a)
+    base = next(c for c in r.cases if c.case == "base")
+    shares = r.inputs["shares"]
+    price = valuation.case_ladder(0.11, r.normalized_oe / shares, r.inputs["net_debt_dcf"] / shares, base.assumptions)
+
+    r = analysis.analyze("GGG", price=price, a=a)
+    assert r.expected_return_irr == pytest.approx(0.11, abs=1e-4)
+    assert r.decision.verdict != "CANDIDATE"
+    assert "expected return 11.0% < 12% hurdle" in r.decision.reason
+
+    # Same price against the default 10% hurdle: 11% clears it, so no hurdle miss.
+    r10 = analysis.analyze("GGG", price=price)
+    assert "hurdle" not in r10.decision.reason
+
+
+def test_verdict_hurdle_argument():
+    lines = [
+        scorecard.Line("Earnings quality & consistency", 45, 45, ""),
+        scorecard.Line("Valuation & expected return", 15, 20, ""),
+        scorecard.Line("Margin of safety", 10, 10, ""),
+    ]
+    j = scorecard.Judgment(15, 10, "test", "2026-01-01")
+    assert scorecard.verdict(lines, j, [], 0.11, 0.30).verdict == "CANDIDATE"
+    d = scorecard.verdict(lines, j, [], 0.11, 0.30, hurdle=0.12)
+    assert d.verdict == "WAIT" and "< 12% hurdle" in d.reason
+
+
+def test_terminal_growth_at_or_above_discount_rate_raises():
+    case = Case(
+        "bad", discount_rate=0.02, oe_haircut=1.0, g_start=0.05, g_terminal=0.03, roiic=0.15, roiic_terminal=0.15
+    )
+    with pytest.raises(ValueError, match="discount rate must exceed terminal growth"):
+        valuation.project(6.50, case)

@@ -2,7 +2,7 @@
 
 analyze TICKER [--live] [--price P] [--no-judgment] [--out DIR]
 screen  TICKER [TICKER ...] [--live]        one-line-per-company summary table
-snapshot TICKER [TICKER ...]                save live SEC data as an offline fixture
+snapshot TICKER [TICKER ...] [--out-dir DIR]  save live SEC data as offline fixtures (default ./fixtures)
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -27,6 +28,16 @@ def ticker(value: str) -> str:
     if not TICKER_RE.match(t) or ".." in t:
         raise argparse.ArgumentTypeError(f"invalid ticker {value!r}")
     return t
+
+
+def price(value: str) -> float:
+    try:
+        p = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid price {value!r}: not a number") from None
+    if not math.isfinite(p) or p <= 0:
+        raise argparse.ArgumentTypeError(f"invalid price {value!r}: must be a finite number > 0")
+    return p
 
 
 def _run(ticker, args):
@@ -48,14 +59,17 @@ def main(argv=None) -> int:
     a = sub.add_parser("analyze")
     a.add_argument("ticker", type=ticker)
     a.add_argument("--live", action="store_true", help="fetch from SEC instead of the bundled snapshot")
-    a.add_argument("--price", type=float)
-    a.add_argument("--no-judgment", action="store_true", help="ignore data/judgment inputs")
+    a.add_argument("--price", type=price, help="share price to value against (must be > 0)")
+    a.add_argument("--no-judgment", action="store_true", help="ignore the bundled judgment inputs")
     a.add_argument("--out", type=Path, help="write the brief to DIR/TICKER.md")
     s = sub.add_parser("screen")
     s.add_argument("tickers", nargs="+", type=ticker)
     s.add_argument("--live", action="store_true")
     n = sub.add_parser("snapshot")
     n.add_argument("tickers", nargs="+", type=ticker)
+    n.add_argument(
+        "--out-dir", type=Path, default=Path("fixtures"), help="where to write TICKER.json.gz (default ./fixtures)"
+    )
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":
@@ -67,9 +81,10 @@ def main(argv=None) -> int:
     elif args.cmd == "screen":
         print(report.summary_table([_run(t, args) for t in args.tickers]))
     elif args.cmd == "snapshot":
+        args.out_dir.mkdir(parents=True, exist_ok=True)
         for t in args.tickers:
             facts = edgar.fetch_companyfacts(t)
-            path = edgar.FIXTURES / f"{t.upper()}.json.gz"
+            path = args.out_dir / f"{t.upper()}.json.gz"
             with gzip.open(path, "wt", encoding="utf-8") as f:
                 json.dump(facts, f, separators=(",", ":"))
             print(f"saved {path}")
