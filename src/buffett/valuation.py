@@ -108,6 +108,8 @@ def project(oe0: float, case: Case, years: int = 10) -> Projection:
         oe *= 1 + g
         path.append({"t": t, "g": g, "b": b, "oe": oe, "distributable": oe * (1 - b)})
     g_inf = case.g_terminal
+    if r <= g_inf:
+        raise ValueError("discount rate must exceed terminal growth")
     b_inf = min(g_inf / case.roiic_terminal, 1.0) if case.roiic_terminal > 0 else 1.0
     terminal = oe * (1 + g_inf) * (1 - b_inf) / (r - g_inf)
     return {"path": path, "terminal": terminal, "terminal_multiple": terminal / oe}

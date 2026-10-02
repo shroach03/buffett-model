@@ -31,6 +31,13 @@ class Judgment:
     fatal_flaws: list[str] = field(default_factory=list)
     notes: str = ""
 
+    def __post_init__(self):
+        for name, hi in (("moat", 15), ("management", 10)):
+            v = getattr(self, name)
+            # bool is a subclass of int, so reject it explicitly
+            if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= hi:
+                raise ValueError(f"Judgment.{name} must be an integer 0-{hi}, got {v!r}")
+
 
 @dataclass
 class Line:
@@ -91,13 +98,22 @@ def returns_on_capital(roe_med, roic_med, roiic, roic_min, nopat_grew) -> Line:
 
 
 def balance_sheet(bs) -> Line:
+    # Unknown inputs score 0: a data gap must never earn the points of a clean balance sheet.
     lev = bs.net_debt_to_oe
-    p = 5 if bs.net_debt <= 0 else band(-lev if lev is not None else None, [(-1, 4), (-2, 3), (-3, 1)])
-    p += 5 if bs.coverage is None else band(bs.coverage, [(12, 5), (6, 4), (3, 2)])
-    basis = (
-        f"net debt incl. leases {bs.net_debt / 1e6:,.0f}M = {_x(lev)} OE; coverage "
-        f"{'no interest' if bs.coverage is None else f'{bs.coverage:.0f}x'}"
-    )
+    if bs.net_debt is None:
+        p, debt_txt = 0, "net debt unknown"
+    else:
+        p = 5 if bs.net_debt <= 0 else band(-lev if lev is not None else None, [(-1, 4), (-2, 3), (-3, 1)])
+        debt_txt = f"net debt incl. leases {bs.net_debt / 1e6:,.0f}M = {_x(lev)} OE"
+    if bs.coverage_status == "no_interest":
+        p += 5
+        cov_txt = "no interest"
+    elif bs.coverage_status == "unknown" or bs.coverage is None:
+        cov_txt = "unknown"
+    else:
+        p += band(bs.coverage, [(12, 5), (6, 4), (3, 2)])
+        cov_txt = f"{bs.coverage:.0f}x"
+    basis = f"{debt_txt}; coverage {cov_txt}"
     return Line("Balance-sheet strength", p, 10, basis)
 
 
@@ -111,11 +127,19 @@ def margin_of_safety(mos) -> Line:
     return Line("Margin of safety", p, 10, f"discount to base-case IV {_pct(mos)}")
 
 
-def verdict(lines: list[Line], judgment: Judgment | None, fatal: list[str], expected_return, mos) -> Decision:
+def verdict(
+    lines: list[Line],
+    judgment: Judgment | None,
+    fatal: list[str],
+    expected_return,
+    mos,
+    hurdle: float = HURDLE,
+    min_mos: float = MIN_MOS,
+) -> Decision:
     quant = {line.category: line.points for line in lines}
     quant_quality = sum(v for k, v in quant.items() if k not in ("Valuation & expected return", "Margin of safety"))
     price_pts = quant.get("Valuation & expected return", 0) + quant.get("Margin of safety", 0)
-    price_ok = expected_return is not None and expected_return >= HURDLE and mos is not None and mos >= MIN_MOS
+    price_ok = expected_return is not None and expected_return >= hurdle and mos is not None and mos >= min_mos
     fatal = list(fatal) + (judgment.fatal_flaws if judgment else [])
 
     if judgment is None:
@@ -146,10 +170,10 @@ def verdict(lines: list[Line], judgment: Judgment | None, fatal: list[str], expe
         v, why = "CANDIDATE", "all gates pass: study it, don't buy it"
     else:
         misses = []
-        if expected_return is None or expected_return < HURDLE:
-            misses.append(f"expected return {_pct(expected_return)} < {HURDLE:.0%} hurdle")
-        if mos is None or mos < MIN_MOS:
-            misses.append(f"margin of safety {_pct(mos)} < {MIN_MOS:.0%}")
+        if expected_return is None or expected_return < hurdle:
+            misses.append(f"expected return {_pct(expected_return)} < {hurdle:.0%} hurdle")
+        if mos is None or mos < min_mos:
+            misses.append(f"margin of safety {_pct(mos)} < {min_mos:.0%}")
         if total < 75:
             misses.append(f"total {total}/100 < 75")
         v, why = "WAIT", "quality passes; " + "; ".join(misses)

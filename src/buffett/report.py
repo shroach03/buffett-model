@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .analysis import Result
+from .balance_sheet import BalanceSheet
 
 
 def _m(x):
@@ -78,7 +79,7 @@ def _expected_return(r: Result) -> list[str]:
     out.append("## Expected return\n")
     if r.expected_return_irr is not None:
         out.append(
-            f"- **Base-case 10-year IRR: {_p(r.expected_return_irr)}** vs {_p(0.10, 0)} hurdle. "
+            f"- **Base-case 10-year IRR: {_p(r.expected_return_irr)}** vs {_p(i['hurdle'], 0)} hurdle. "
             f"Growth starts at g = b × ROIIC = {_p(i['b_base'])} × {_p(i['roiic_base'])} = {_p(i['g_base'])} "
             f"and fades to 2.5%; exit at the base case's own value, {i['base_exit_multiple']:.1f}× OE."
         )
@@ -97,7 +98,8 @@ def _expected_return(r: Result) -> list[str]:
             else f"no starting growth rate at the base-case ROIIC of {_p(i['roiic_base'])} justifies today's price"
         )
         out.append(
-            f"- Reverse DCF: to earn 10% from here, the market must pay **{i['required_exit_multiple']:.1f}× "
+            f"- Reverse DCF: to earn {_p(i['hurdle'], 0)} from here, the market must pay "
+            f"**{i['required_exit_multiple']:.1f}× "
             f"owner earnings in year ten** (base case: {i['base_exit_multiple']:.1f}×). "
             f"Holding the base terminal assumptions instead, {rev}.\n"
         )
@@ -107,7 +109,7 @@ def _expected_return(r: Result) -> list[str]:
             if not r.price
             else "the IRR could not be solved at this price"
             if r.cases
-            else "missing owner earnings or returns"
+            else "missing owner earnings, returns or debt"
         )
         out.append("Not computable: " + why + "\n")
     return out
@@ -180,12 +182,20 @@ def _balance_sheet(r: Result) -> list[str]:
         f"{_m(b.excess_cash)}M = net debt **{_m(b.net_debt)}M** "
         f"({'n/a' if b.net_debt_to_oe is None else f'{b.net_debt_to_oe:.2f}×'} OE; stressed "
         f"{'n/a' if b.stressed_net_debt_to_oe is None else f'{b.stressed_net_debt_to_oe:.2f}×'}). Coverage "
-        f"{'no interest expense' if b.coverage is None else f'{b.coverage:,.0f}×'} "
+        f"{_coverage(b)} "
         f"(stressed {'n/a' if b.stressed_coverage is None else f'{b.stressed_coverage:,.0f}×'}). "
         "Not testable from XBRL facts: pension deficits, supplier financing, guarantees, litigation, "
         "maturity schedule.\n"
     )
     return out
+
+
+def _coverage(b: BalanceSheet) -> str:
+    if b.coverage_status == "no_interest":
+        return "no interest expense"
+    if b.coverage is None:
+        return "unknown (debt or interest data missing)"
+    return f"{b.coverage:,.0f}×"
 
 
 def _provenance(r: Result) -> list[str]:

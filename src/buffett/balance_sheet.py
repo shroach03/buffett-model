@@ -30,15 +30,19 @@ from .normalize import Financials
 
 @dataclass
 class BalanceSheet:
-    total_debt: float
-    operating_leases: float
+    # Debt figures are None when a latest-year value is a gap between reported
+    # years (unknown). Genuinely absent values were already zero-filled by normalize.
+    total_debt: float | None
+    operating_leases: float | None
     excess_cash: float
-    net_debt: float  # incl. leases, less excess cash
+    net_debt: float | None  # incl. leases, less excess cash
     net_debt_to_oe: float | None
-    coverage: float | None  # None = no interest expense (effectively infinite)
+    coverage: float | None  # set only when coverage_status == "ok"
     stressed_net_debt_to_oe: float | None
     stressed_coverage: float | None
     leverage_fatal: bool
+    coverage_status: str = "ok"  # ok / no_interest (interest is known to be 0) / unknown
+    debt_known: bool = True
 
 
 def worst_decline(series: list[float | None]) -> float:
@@ -53,25 +57,32 @@ def worst_decline(series: list[float | None]) -> float:
 def compute(
     f: Financials, excess_cash: float, normalized_oe: float | None, oe_history: list[float | None], window: int = 10
 ) -> BalanceSheet:
-    debt = (f["long_term_debt"][-1] or 0.0) + (f["short_term_debt"][-1] or 0.0)
-    leases = f["operating_leases"][-1] or 0.0
-    net = debt + leases - excess_cash
-    interest = f["interest_expense"][-1] or 0.0
+    lt, st = f["long_term_debt"][-1], f["short_term_debt"][-1]
+    debt = None if lt is None or st is None else lt + st
+    leases = f["operating_leases"][-1]
+    net = None if debt is None or leases is None else debt + leases - excess_cash
+    interest = f["interest_expense"][-1]
     ebit = f["operating_income"][-1]
 
     def ratio(nd, oe):
-        if oe is None:
+        if nd is None or oe is None:
             return None
         if nd <= 0:
             return nd / oe if oe > 0 else None
         return nd / oe if oe > 0 else float("inf")
 
-    cov = ebit / interest if interest > 0 and ebit is not None else None
     stressed_ebit = None if ebit is None else ebit * (1 + worst_decline(f["operating_income"][-window:]))
     stressed_oe = None if normalized_oe is None else normalized_oe * (1 + worst_decline(oe_history[-window:]))
-    s_cov = stressed_ebit / interest if interest > 0 and stressed_ebit is not None else None
+    cov = s_cov = None
+    if interest is not None and interest <= 0:
+        status = "no_interest"
+    elif interest is None or ebit is None or stressed_ebit is None:
+        status = "unknown"
+    else:
+        status = "ok"
+        cov, s_cov = ebit / interest, stressed_ebit / interest
     s_lev = ratio(net, stressed_oe)
     lev = ratio(net, normalized_oe)
 
     fatal = (s_lev is not None and s_lev > 3.0) or (s_cov is not None and s_cov < 3.0)
-    return BalanceSheet(debt, leases, excess_cash, net, lev, cov, s_lev, s_cov, fatal)
+    return BalanceSheet(debt, leases, excess_cash, net, lev, cov, s_lev, s_cov, fatal, status, net is not None)

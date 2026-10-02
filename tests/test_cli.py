@@ -3,7 +3,7 @@ cleanly on platforms whose default codepage is not UTF-8 (Windows)."""
 
 import pytest
 
-from buffett import analysis, report, valuation
+from buffett import analysis, report, scorecard, valuation
 from buffett.analysis import analyze
 from buffett.cli import main
 
@@ -67,3 +67,64 @@ def test_unsolvable_irr_reports_na_and_warns(monkeypatch):
     md = report.brief(r)
     assert "IRR could not be solved" in md and "⚠ expected return not computable" in md
     assert "n/a" in report.summary_table([r])
+
+
+@pytest.mark.parametrize("field,value", [("moat", 51), ("moat", -1), ("moat", True), ("management", 10.5)])
+def test_judgment_rejects_out_of_range_scores(field, value):
+    kwargs = {"moat": 10, "management": 5, "source": "test", "date": "2026-01-01", field: value}
+    with pytest.raises(ValueError, match=field):
+        scorecard.Judgment(**kwargs)
+
+
+def test_judgment_file_missing_source_names_file_and_field(tmp_path):
+    (tmp_path / "XYZ.json").write_text('{"moat": 10, "management": 5, "date": "2026-01-01"}', encoding="utf-8")
+    with pytest.raises(ValueError, match=r"XYZ\.json.*source"):
+        analysis.load_judgment("XYZ", tmp_path)
+
+
+def test_judgment_file_out_of_range_names_file(tmp_path):
+    (tmp_path / "XYZ.json").write_text(
+        '{"moat": 51, "management": 5, "source": "s", "date": "2026-01-01"}', encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match=r"XYZ\.json.*moat"):
+        analysis.load_judgment("XYZ", tmp_path)
+
+
+@pytest.mark.parametrize("ticker", ["CPRT", "GGG", "ROL", "WAT", "WSO"])
+def test_shipped_judgment_files_load(ticker):
+    assert analysis.load_judgment(ticker) is not None
+
+
+@pytest.mark.parametrize("bad", ["-5", "0", "nan", "inf", "abc"])
+def test_cli_rejects_bad_price(bad, capsys):
+    with pytest.raises(SystemExit) as e:
+        main(["analyze", "ROL", "--price", bad])
+    assert e.value.code == 2
+    assert "invalid price" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("bad", [-5.0, 0.0, float("nan"), float("inf"), float("-inf")])
+def test_analyze_rejects_bad_price(bad):
+    with pytest.raises(ValueError, match="price"):
+        analyze("ROL", price=bad)
+
+
+def test_snapshot_writes_to_out_dir_not_the_package(tmp_path, monkeypatch):
+    from buffett import edgar
+
+    monkeypatch.setattr(edgar, "fetch_companyfacts", lambda t: {"entityName": t, "facts": {}})
+    out = tmp_path / "snaps"
+    assert main(["snapshot", "ROL", "--out-dir", str(out)]) == 0
+    assert (out / "ROL.json.gz").exists()
+    monkeypatch.chdir(tmp_path)
+    assert main(["snapshot", "GGG"]) == 0
+    assert (tmp_path / "fixtures" / "GGG.json.gz").exists()  # default ./fixtures
+
+
+def test_cache_lives_outside_the_package():
+    from pathlib import Path
+
+    from buffett import edgar
+
+    pkg = Path(edgar.__file__).resolve().parent
+    assert pkg not in edgar.CACHE.resolve().parents
