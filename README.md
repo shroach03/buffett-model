@@ -15,20 +15,27 @@ $ buffett screen ROL WAT
 
 *(Trimmed for the README. The real table has more columns.)*
 
+### What I built
+
+- **Replaced LLM-in-chat arithmetic** with a deterministic pipeline: byte-identical briefs, 111 tests.
+- **Designed the XBRL normalization layer:** splits, unscaled share counts, tag drift, restatements.
+- **Made missing data stay missing:** Waters gets 3 years of owner earnings, not 10 guesses.
+- **Found that the ROIIC window alone flips WSO's verdict** (PASS in chat, WAIT in code).
+
 The framework started as a set of prompts for an LLM. The LLM did all the arithmetic in chat, from numbers it found by web search. That left no way to reproduce a score or check a valuation. This repo moves every calculation into tested code and keeps the LLM (or a human) only for the two judgment categories that data can't measure: moat and management.
 
 > Analysis tooling for one person's own decisions. Not investment advice.
 
 ### What is "the Model"?
 
-The README and the code refer to "the Model" throughout. It is the author's own written investment framework, and this repo is its executable form. In short:
+The README and the code refer to "the Model" throughout. It is the author's own written investment framework, and this repo is its executable form. The full write-up is in [MODEL.md](MODEL.md). In short:
 
 - **Owner earnings** as the cash-flow measure, not reported EPS: net income + D&A + non-cash impairments − estimated maintenance capex − the working capital needed to support growth. Stock-based compensation counts as a real cost.
 - **A 100-point scorecard.** 70 points for quality: moat, earnings consistency, returns on capital (ROE, ROIC, 5-year ROIIC), balance sheet and management. The other 30 are valuation and margin of safety. 75 points are measured from data and 25 come from judgment.
 - **A decision rule.** A stock is a CANDIDATE only if quality ≥ 55, the conservative 10-year expected return clears a 10% hurdle, the margin of safety is ≥ 20% and the total is ≥ 75. Otherwise it is WAIT or PASS.
 - **A price ladder and reverse DCF.** They answer "what price earns 10%?" and "what does today's price assume?".
 
-The section numbers cited in the code (§1, §10, §11, §12) refer to that document.
+The section numbers cited in the code (`Model §N`) are the `§N` headings in [MODEL.md](MODEL.md).
 
 ## What it does
 
@@ -44,8 +51,8 @@ SEC companyfacts JSON ──► normalize.py ──► owner_earnings / returns 
 ```
 
 ```bash
-pip install -e ".[dev]"
-pytest -q                                   # 79 tests, offline (CI also enforces >= 85% coverage)
+pip install -r requirements-dev.txt && pip install --no-deps -e .   # same pinned versions as CI
+pytest -q                                   # 111 tests, offline (CI also enforces >= 85% coverage)
 ruff check . && ruff format --check . && mypy src   # lint, format, types (all run in CI)
 buffett screen CPRT GGG ROL WAT WSO         # summary table
 buffett analyze ROL --out reports           # full brief
@@ -130,12 +137,17 @@ src/buffett/
   scorecard.py       100-point scorecard and decision rule
   analysis.py        pipeline + named assumptions
   report.py / cli.py Markdown briefs and command line
-data/fixtures/       gzipped SEC companyfacts snapshots (10-K facts) for offline tests
-data/judgment/       moat / management / fatal-flaw inputs, each with a source and date
-data/prices.json     dated price snapshot
+  data/fixtures/     gzipped SEC companyfacts snapshots (10-K facts) for offline tests
+  data/judgment/     moat / management / fatal-flaw inputs, each with a source and date
+  data/prices.json   dated price snapshot
 reports/             generated briefs
 tests/               Model-math, normalization, CLI, mocked SEC client and five-company integration tests
 ```
+
+The bundled data ships inside the package, so `pip install .` works from any folder, and the installed package is only ever read. Set `BUFFETT_DATA` to use your own data directory (same `fixtures/`, `judgment/`, `prices.json` layout). `--live` downloads are cached in `BUFFETT_CACHE`, default `~/.cache/buffett`. `buffett snapshot TICKER` writes to `./fixtures` (or `--out-dir DIR`), never into the install.
+
+`requirements-dev.txt` pins every dev dependency for Python 3.10+ on all platforms. Regenerate it after changing dependencies in `pyproject.toml`:
+`uv pip compile pyproject.toml --extra dev --universal --python-version 3.10 -o requirements-dev.txt`.
 
 ## Reproducibility
 
