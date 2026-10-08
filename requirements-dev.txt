@@ -54,7 +54,7 @@ pytz==2026.4 ; python_full_version < '3.11'
     # via pandas
 requests==2.34.2
     # via buffett-model (pyproject.toml)
-ruff==0.16.9
+ruff==0.16.10
     # via buffett-model (pyproject.toml)
 six==1.17.0
     # via python-dateutil
