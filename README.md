@@ -52,8 +52,8 @@ SEC companyfacts JSON ──► normalize.py ──► owner_earnings / returns 
 
 ```bash
 pip install -r requirements-dev.txt && pip install --no-deps -e .   # same pinned versions as CI
-pytest -q                                   # 111 tests, offline (CI also enforces >= 85% coverage)
-ruff check . && ruff format --check . && mypy src   # lint, format, types (all run in CI)
+pytest -q                                   # 111 tests, offline 
+ruff check . && ruff format --check . && mypy src   # lint, format, types
 buffett screen CPRT GGG ROL WAT WSO         # summary table
 buffett analyze ROL --out reports           # full brief
 export SEC_USER_AGENT="Your Name you@example.com"
@@ -74,7 +74,7 @@ Snapshot of SEC data retrieved 2026-09-24. Prices are Sep 16, 2026 closes. Full 
 
 WAT's price-based columns aren't meaningful: they compare a post-merger share price with pre-merger per-share owner earnings (see Limitations).
 
-These are four excellent businesses (median ROIC 23–32%, 10 of 10 years of positive owner earnings) at prices that only work if the market still pays 20–30× owner earnings in 2036. The Model's own DCF (terminal growth 2–3%) implies about 12×. The reverse-DCF column states that gap directly.
+These are four of the five businesses (median ROIC 23–32%, 10 of 10 years of positive owner earnings) at prices that only work if the market still pays 20–30× owner earnings in 2036. The Model's own DCF (terminal growth 2–3%) implies about 12×. The reverse-DCF column states that gap directly.
 
 ### Code vs. the original LLM-in-chat analysis
 
