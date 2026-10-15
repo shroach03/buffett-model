@@ -63,7 +63,7 @@ tomli==2.4.1 ; python_full_version <= '3.11'
     #   coverage
     #   mypy
     #   pytest
-types-requests==2.33.0.20260906
+types-requests==2.33.0.20261006
     # via buffett-model (pyproject.toml)
 typing-extensions==4.16.0
     # via
