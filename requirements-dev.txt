@@ -36,7 +36,7 @@ pandas==3.0.6 ; python_full_version >= '3.11'
     # via buffett-model (pyproject.toml)
 pathspec==1.1.1
     # via mypy
-pluggy==1.6.0
+pluggy==1.7.0
     # via
     #   pytest
     #   pytest-cov
