@@ -1,0 +1,5 @@
+{
+  "as_of": "2026-09-16",
+  "source": "Closing prices recorded in the project's paper-portfolio log (stockanalysis.com quote pages, retrieved 2026-09-17). Replace with current prices before relying on price-dependent outputs.",
+  "prices": {"CPRT": 30.82, "GGG": 76.28, "ROL": 33.53, "WAT": 418.64, "WSO": 304.20}
+}

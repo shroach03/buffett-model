@@ -1,0 +1,14 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.cache/
+.venv/
+.env
+.env.*
+!.env.example
+# never commit brokerage exports or account data
+*Positions*.csv
+build/

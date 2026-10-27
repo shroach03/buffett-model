@@ -1,0 +1,11 @@
+{
+  "ticker": "WAT",
+  "moat": 10,
+  "management": 6,
+  "fatal_flaws": [
+    "leverage: the BD Biosciences & Diagnostics merger (closed Feb 2026) added ~$4B of debt and nearly doubled the share count; the FY2025 10-K data used here predates it"
+  ],
+  "notes": "Legacy moat strong (razor/blade instruments + consumables); combined entity unproven. The code's numbers describe pre-merger Waters.",
+  "source": "Opportunity brief of 2026-08-03 (LLM-assisted chat session, reviewed by the user; not independently verified). Replace with your own read.",
+  "date": "2026-08-03"
+}
